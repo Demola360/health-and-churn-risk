@@ -170,6 +170,7 @@ health-and-churn-risk/
 ├── generate_client_data.py      # Generates simulated client/login/ticket data
 ├── load_to_bigquery.py          # Loads the 4 core CSVs into BigQuery
 ├── load_answer_key.py           # Loads the synthetic answer key, validation-only
+├── validate_pipeline.py         # 13 data-quality checks against BigQuery
 ├── risk_layer.sql               # Rolling risk CTEs and the combined 0-100 risk view
 ├── secrets.toml.example         # Template for Streamlit Cloud deployment credentials
 ├── requirements.txt
@@ -274,9 +275,11 @@ what's built vs. what's aspirational.
   requirements document, or acceptance-criteria set backing this project —
   appropriate for a solo technical portfolio piece, but a real BA
   engagement would produce these before any dashboard work started.
-- **No automated tests.** No unit tests, schema tests, or data-quality
-  assertions exist yet. For a project this size, the practical middle
-  ground is a lightweight validation script rather than a full test suite.
+- **Data-quality checks exist, but no full test suite.** `validate_pipeline.py`
+  runs 13 SQL-based checks (row counts, duplicate/null client IDs,
+  referential integrity, value ranges, category validity) and exits
+  non-zero on failure — sufficient for this project's size, but not a
+  substitute for unit tests on the Python transformation logic itself.
 - **BigQuery Sandbox tables expire after 60 days of inactivity.** Fine for
   active development, but anyone picking this project back up after a long
   break needs to rerun the pipeline before the dashboard has data to read.
@@ -310,6 +313,7 @@ deliberately leaves out:
 | `generate_client_data.py` | Generates simulated client/login/ticket data |
 | `load_to_bigquery.py` | Loads the 4 core CSVs into BigQuery tables |
 | `load_answer_key.py` | Loads the synthetic answer key separately, for validation only |
+| `validate_pipeline.py` | Runs 13 data-quality checks against the loaded pipeline |
 | `risk_layer.sql` | SQL views: rolling trends, renewal window, market stress, combined risk score |
 | `app.py` | Streamlit dashboard |
 | `requirements.txt` | Python dependencies |
