@@ -1,5 +1,5 @@
 """
-Client Retention Risk Prioritisation Dashboard
+Client Retention Risk Prioritisation
 """
 
 import os
