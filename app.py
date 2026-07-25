@@ -131,16 +131,28 @@ total_clients = len(filtered)
 high_risk_n = int((filtered["risk_tier"] == "High").sum())
 high_risk_pct = (high_risk_n / total_clients * 100) if total_clients else 0
 avg_score = filtered["risk_score"].mean() if total_clients else 0
-value_at_risk = filtered.loc[filtered["risk_tier"] == "High", "policy_value_gbp"].sum()
+high_risk_value = filtered.loc[filtered["risk_tier"] == "High", "policy_value_gbp"].sum()
+lapsed_high_risk_n = int(
+    ((filtered["risk_tier"] == "High") & (filtered["renewal_status"] == "Lapsed")).sum()
+)
 
 col1.metric("Clients (filtered)", f"{total_clients:,}")
 col2.metric("High risk", f"{high_risk_n:,}", f"{high_risk_pct:.1f}% of total")
 col3.metric("Avg risk score", f"{avg_score:.1f} / 100")
-col4.metric("Policy value at risk (High tier)", f"\u00a3{value_at_risk:,.0f}")
+col4.metric("High-risk policy value", f"\u00a3{high_risk_value:,.0f}")
+
+if total_clients:
+    st.info(
+        f"**{high_risk_n} clients** currently require attention, representing "
+        f"**\u00a3{high_risk_value:,.0f}** in high-risk policy value. "
+        f"**{lapsed_high_risk_n}** of these have already passed their renewal date "
+        f"and should be prioritised first."
+    )
 
 if not market.empty:
     st.caption(
-        f"Banking sector context (last 30d): avg volatility "
+        f"Banking sector context (last 30d, shown as assumed relevant "
+        f"context — not used in the risk score): avg volatility "
         f"{market['avg_sector_volatility_30d'].iloc[0]:.4f}, "
         f"avg daily return {market['avg_sector_return_30d'].iloc[0]:.4f}"
     )
@@ -220,10 +232,20 @@ sort_by = st.selectbox(
 )
 ascending = st.checkbox("Ascending", value=False)
 
+DRIVER_LABELS = {
+    "login_risk_points": "Login inactivity",
+    "ticket_risk_points": "Support issues",
+    "renewal_risk_points": "Renewal approaching",
+}
+driver_points = filtered[["login_risk_points", "ticket_risk_points", "renewal_risk_points"]]
+filtered = filtered.copy()
+filtered["primary_risk_driver"] = driver_points.idxmax(axis=1).map(DRIVER_LABELS)
+filtered.loc[driver_points.sum(axis=1) == 0, "primary_risk_driver"] = "No significant driver"
+
 display_cols = [
-    "client_id", "risk_tier", "risk_score", "recommended_action", "renewal_status",
-    "days_to_renewal", "tenure_months", "policy_value_gbp", "login_activity_status",
-    "login_change_30d_pct", "tickets_last_30d", "unresolved_last_30d",
+    "client_id", "risk_tier", "risk_score", "primary_risk_driver", "recommended_action",
+    "renewal_status", "days_to_renewal", "tenure_months", "policy_value_gbp",
+    "login_activity_status", "login_change_30d_pct", "tickets_last_30d", "unresolved_last_30d",
 ]
 table = filtered[display_cols].sort_values(sort_by, ascending=ascending).copy()
 
@@ -240,6 +262,10 @@ st.dataframe(
     column_config={
         "risk_score": st.column_config.ProgressColumn(
             "Risk score", min_value=0, max_value=100, format="%.0f"
+        ),
+        "primary_risk_driver": st.column_config.TextColumn(
+            "Main risk driver",
+            help="The single signal contributing the most points to this client's score",
         ),
         "recommended_action": st.column_config.TextColumn(
             "Recommended action",
@@ -262,11 +288,14 @@ st.dataframe(
     },
 )
 
-action_list = filtered.loc[
-    filtered["risk_tier"].isin(["High", "Medium"]),
-    ["client_id", "risk_tier", "recommended_action", "renewal_status",
-     "days_to_renewal", "policy_value_gbp"],
-].sort_values("risk_tier")
+action_list = (
+    filtered[filtered["risk_tier"].isin(["High", "Medium"])]
+    .sort_values(
+        ["risk_score", "days_to_renewal", "policy_value_gbp"],
+        ascending=[False, True, False],
+    )[["client_id", "risk_tier", "primary_risk_driver", "recommended_action",
+       "renewal_status", "days_to_renewal", "policy_value_gbp"]]
+)
 
 st.download_button(
     "Download action list (High + Medium risk clients)",
@@ -286,7 +315,10 @@ if client_options:
     selected_client = st.selectbox("Client ID", options=client_options)
     row = filtered[filtered["client_id"] == selected_client].iloc[0]
 
-    st.info(f"**Recommended action:** {row['recommended_action']}")
+    st.info(
+        f"**Recommended action:** {row['recommended_action']}  \n"
+        f"**Main risk driver:** {row['primary_risk_driver']}"
+    )
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Risk score", f"{row['risk_score']:.0f} / 100", row["risk_tier"])

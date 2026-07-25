@@ -38,17 +38,94 @@ because there is no real churn label to learn from or validate against.
 See **Limitations** below for the full picture, including what a genuine
 predictive version of this project would require.
 
-## Business context (assumed)
+## Business analysis
 
-This project models a **financial-services provider with an
-insurance-style product** — clients hold a policy with a renewal date and
-a policy value, and engage via a client portal (logins) and a support desk
-(tickets). The specific type of institution (insurer, wealth platform,
-broker) isn't pinned down further; this is a deliberate simplification for
-a portfolio project, not a real organisation's actual retention program. A
-production version would start with a stakeholder-validated business
-problem statement and a precise definition of "churn" (e.g. "policy not
-renewed within 30 days of its renewal date") before any modelling work.
+This section exists because the artefacts behind a dashboard matter as
+much as the dashboard itself — this is the thinking that led to the
+build, not an afterthought written to justify it.
+
+### Stakeholder
+
+Retention / account management team at a financial-services provider
+with an insurance-style product.
+
+### Business problem
+
+A retention team cannot investigate every client in the book equally.
+Without a consistent way to identify which accounts need attention
+first, the highest-risk clients — the ones already showing signs of
+disengagement, or approaching a renewal decision without re-engaging —
+can go unnoticed until it's too late to intervene.
+
+### User story
+
+As a retention manager, I want to identify high-risk clients approaching
+renewal, so that my team can prioritise outreach instead of reviewing
+accounts in no particular order.
+
+### Business context (assumed)
+
+Clients hold a policy with a renewal date and a policy value, and engage
+via a client portal (logins) and a support desk (tickets). The specific
+type of institution (insurer, wealth platform, broker) isn't pinned down
+further — a deliberate simplification for a portfolio project, not a
+real organisation's actual retention program.
+
+### Functional requirements
+
+| ID | Requirement |
+|---|---|
+| FR01 | User shall filter accounts by risk tier |
+| FR02 | User shall identify clients by renewal urgency (upcoming / due soon / lapsed) |
+| FR03 | System shall show the primary factor contributing to each client's risk score |
+| FR04 | System shall recommend an action based on risk tier and renewal urgency |
+| FR05 | User shall export a prioritised, sorted action list |
+
+### Non-functional requirements
+
+- Dashboard should be understandable without statistical knowledge
+- Data refresh should complete without manual intervention where feasible
+- No sensitive customer information should be exposed (mitigated here by using synthetic data)
+
+### Business rules
+
+Risk tier + renewal status → recommended action:
+
+| Risk tier | Renewal status | Recommended action |
+|---|---|---|
+| High | Lapsed | Recovery call — policy already lapsed, contact immediately |
+| High | Renewal due soon | Priority retention outreach before renewal date |
+| High | Upcoming | Proactive check-in — high risk, renewal not yet imminent |
+| Medium | Lapsed / Renewal due soon | Soft touchpoint ahead of renewal decision |
+| Medium | Upcoming | Monitor — flag if score rises further |
+| Low | Any | No action needed |
+
+### Assumptions
+
+- "Churn" is assumed to mean non-renewal, though no formal outcome
+  variable is defined or measured (see Limitations)
+- The 40/30/15/15 point weighting and the 65/35 tier thresholds are
+  business rules chosen for this proof of concept, not empirically
+  calibrated against real outcomes — a production implementation would
+  validate them against historical churn data
+- A client with zero recent login activity is assumed to carry the
+  highest engagement-related risk, rather than being treated as
+  "insufficient data, default to zero risk"
+- Banking-sector market volatility is assumed to be *relevant context*
+  for a financial-services client base, but **not** assumed to be
+  predictive of individual client churn — this assumption is untested
+  (see the caveat under "How the model works" below) and deliberately
+  excluded from the risk score as a result
+
+### As-is
+
+Retention team manually reviews client accounts with no consistent
+prioritisation method.
+
+### To-be
+
+System prioritises accounts using agreed, transparent risk indicators
+and surfaces a recommended action per client.
 
 ## Data honesty note
 
@@ -81,13 +158,18 @@ on top of the raw tables, then bucketed into Low/Medium/High tiers so a
 non-technical relationship manager can act on it without reading the
 underlying query.
 
-**Market stress is shown, not scored.** A fourth view (`market_stress`)
-summarises volatility across 8 banking-sector tickers (JPM, BAC, WFC, C,
-GS, MS, HSBC, BCS) as portfolio-level context in the dashboard. It is
-**not** joined to individual clients or added to the risk score — there's
-no evidence in this project that sector-wide volatility predicts
-individual client churn, so that claim isn't made. See Limitations for
-what it would take to justify including it properly.
+**Market stress is shown, not scored — this is an untested assumption,
+named as such.** A fourth view (`market_stress`) summarises volatility
+across 8 banking-sector tickers (JPM, BAC, WFC, C, GS, MS, HSBC, BCS) as
+portfolio-level context in the dashboard. It is **not** joined to
+individual clients or added to the risk score. The working assumption is
+that sector-wide market stress is *plausibly relevant context* for a
+financial-services client base — but this project makes no claim that it
+actually predicts individual client churn, and the synthetic data
+couldn't validate that claim even if it were made. Kept in deliberately,
+rather than removed, as an honestly-labelled assumption rather than a
+silently-dropped feature — see **Assumptions** above and **Limitations**
+below for what it would take to test this properly.
 
 ## Key decisions made
 
@@ -123,7 +205,8 @@ what it would take to justify including it properly.
 ## What the dashboard shows
 
 - **Portfolio-level KPIs** — total clients, clients in each risk tier,
-  total policy value at risk
+  total high-risk policy value, plus a one-line portfolio summary
+  (clients requiring attention and how many are already lapsed)
 - **Risk tier distribution** — how many clients fall into Low, Medium, and
   High risk, colour-coded
 - **Risk score vs. days to renewal** — a scatter view (bubble size =
@@ -136,12 +219,17 @@ what it would take to justify including it properly.
   client's score, plus an exact points breakdown (login/ticket/renewal) so
   a relationship manager can see *why* a client is flagged, not just that
   they are
+- **Primary risk driver per client** — the single signal (login
+  inactivity, support issues, or renewal proximity) contributing the most
+  points to that client's score, shown in the table and drill-down
 - **Recommended action per client** — derived from risk tier + renewal
   urgency (e.g. "Recovery call — policy already lapsed" vs. "Monitor —
   flag if score rises further"), so the score translates into a concrete
   next step
 - **Downloadable action list** — a CSV of every High and Medium risk
-  client with their recommended action, ready to hand to a retention team
+  client with their recommended action, sorted by actual business
+  priority (risk score, then renewal urgency, then policy value) rather
+  than alphabetically
 
 In a test run against the current synthetic dataset, the dashboard
 surfaced 24 of 500 clients (4.8%) in the High risk tier, representing
@@ -158,7 +246,8 @@ roughly £58,900 in policy value.
   transparent 0–100 weighted score
 - **Streamlit / Plotly** — interactive dashboard, deployed on Streamlit
   Community Cloud
-- **GitHub Actions** — *planned, not yet implemented* (see Limitations)
+- **GitHub Actions** — daily scheduled refresh of live market data
+  (`.github/workflows/refresh-market-data.yml`)
 
 ## Repo structure
 
@@ -170,7 +259,12 @@ health-and-churn-risk/
 ├── generate_client_data.py      # Generates simulated client/login/ticket data
 ├── load_to_bigquery.py          # Loads the 4 core CSVs into BigQuery
 ├── load_answer_key.py           # Loads the synthetic answer key, validation-only
+├── load_market_data.py          # Refreshes only market_data table (used by GH Actions)
 ├── validate_pipeline.py         # 13 data-quality checks against BigQuery
+│
+├── .github/
+│   └── workflows/
+│       └── refresh-market-data.yml   # Daily scheduled market data refresh
 ├── risk_layer.sql               # Rolling risk CTEs and the combined 0-100 risk view
 ├── secrets.toml.example         # Template for Streamlit Cloud deployment credentials
 ├── requirements.txt
@@ -232,6 +326,22 @@ SELECT COUNT(*) FROM `client_retention.support_tickets`;
 **Note:** Sandbox tables auto-expire after 60 days by default — fine while
 actively building, just re-run the pipeline if picking this back up after
 a long break.
+
+## Setting up the scheduled market data refresh
+
+The workflow in `.github/workflows/refresh-market-data.yml` runs daily and
+needs three repository secrets, set under GitHub repo Settings → Secrets
+and variables → Actions → New repository secret:
+
+| Secret name | Value |
+|---|---|
+| `GCP_SA_KEY` | Full contents of your service account JSON key file |
+| `GCP_PROJECT_ID` | `health-and-churn-risk` (or your project ID) |
+| `BQ_DATASET` | `client_retention` (or your dataset name) |
+
+These are encrypted by GitHub and never appear in workflow logs. You can
+trigger a manual run any time from the Actions tab → "Refresh market
+data" → "Run workflow", without waiting for the daily schedule.
 
 ## Deploying to Streamlit Community Cloud
 See `secrets.toml.example` for the required secrets format (BigQuery
@@ -297,12 +407,11 @@ deliberately leaves out:
   happened with a flagged client, letting the risk model be checked
   against real outcomes and recalibrated rather than running on
   assumptions indefinitely.
-- **Scheduled, automated data refreshes.** GitHub Actions is listed in the
-  tech stack as the intended mechanism for running `fetch_market_data.py`
-  on a schedule, but the workflow file doesn't exist yet — this is planned
-  future work, not a currently running feature. A live client feed would
-  need the same treatment so the dashboard reflects current conditions
-  rather than a point-in-time snapshot.
+- **Scheduled, automated refresh for the client feed.** GitHub Actions now
+  refreshes live market data daily (`.github/workflows/refresh-market-data.yml`),
+  but a real production version would need the same treatment for client
+  behavioural data — replacing the one-off synthetic generation with a
+  live feed on its own schedule.
 - **A trained, validated churn model**, per the Limitations above, with a
   real outcome variable and out-of-sample evaluation.
 
@@ -314,6 +423,8 @@ deliberately leaves out:
 | `load_to_bigquery.py` | Loads the 4 core CSVs into BigQuery tables |
 | `load_answer_key.py` | Loads the synthetic answer key separately, for validation only |
 | `validate_pipeline.py` | Runs 13 data-quality checks against the loaded pipeline |
+| `load_market_data.py` | Refreshes only the market_data table — used by the GitHub Actions workflow |
+| `.github/workflows/refresh-market-data.yml` | Daily scheduled market data refresh |
 | `risk_layer.sql` | SQL views: rolling trends, renewal window, market stress, combined risk score |
 | `app.py` | Streamlit dashboard |
 | `requirements.txt` | Python dependencies |
