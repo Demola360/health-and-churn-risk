@@ -23,7 +23,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 st.set_page_config(
-    page_title="Client Health & Churn Risk Dashboard",
+    page_title="Client Health & Retention Risk Dashboard",
     page_icon="\U0001F4CA",
     layout="wide",
 )
@@ -91,11 +91,13 @@ TIER_COLOR = {"High": "#d62728", "Medium": "#ff7f0e", "Low": "#2ca02c"}
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.title("Client Health & Churn Risk Dashboard")
+st.title("Client Health & Retention Risk Prioritisation Dashboard")
 st.caption(
     "Client behavioural data (logins, support tickets, renewal dates) is "
     "**simulated** with deliberately realistic risk patterns. Banking-sector "
-    "market data is live, pulled via yfinance."
+    "market data is live, pulled via yfinance. This is a rule-based "
+    "prioritisation score, not a trained churn-prediction model — see the "
+    "README for full limitations."
 )
 
 # ---------------------------------------------------------------------------
@@ -105,13 +107,19 @@ st.sidebar.header("Filters")
 selected_tiers = st.sidebar.multiselect(
     "Risk tier", options=TIER_ORDER, default=TIER_ORDER
 )
+RENEWAL_STATUS_ORDER = ["Lapsed", "Renewal due soon", "Upcoming"]
+selected_renewal_status = st.sidebar.multiselect(
+    "Renewal status", options=RENEWAL_STATUS_ORDER, default=RENEWAL_STATUS_ORDER
+)
 max_days = int(df["days_to_renewal"].max()) if not df.empty else 365
 renewal_window = st.sidebar.slider(
     "Days to renewal (max)", min_value=0, max_value=max(max_days, 1), value=max(max_days, 1)
 )
 
 filtered = df[
-    df["risk_tier"].isin(selected_tiers) & (df["days_to_renewal"] <= renewal_window)
+    df["risk_tier"].isin(selected_tiers)
+    & df["renewal_status"].isin(selected_renewal_status)
+    & (df["days_to_renewal"] <= renewal_window)
 ]
 
 # ---------------------------------------------------------------------------
@@ -213,15 +221,16 @@ sort_by = st.selectbox(
 ascending = st.checkbox("Ascending", value=False)
 
 display_cols = [
-    "client_id", "risk_tier", "risk_score", "days_to_renewal",
-    "tenure_months", "policy_value_gbp", "login_change_30d_pct",
+    "client_id", "risk_tier", "risk_score", "renewal_status", "days_to_renewal",
+    "tenure_months", "policy_value_gbp", "login_activity_status", "login_change_30d_pct",
     "tickets_last_30d", "unresolved_last_30d",
 ]
 table = filtered[display_cols].sort_values(sort_by, ascending=ascending).copy()
 
-# login_change_30d_pct is stored as a fraction (e.g. -0.4 = -40%); the
-# sentinel value -1 means "no prior-window logins to compare against" —
-# multiply into a true percentage so the table reads correctly either way.
+# login_change_30d_pct is now a genuine NULL when there's no prior-window
+# data to compare against (rather than a misleading -100% sentinel) — it
+# will simply show blank for those rows. login_activity_status explains
+# why in plain words for every row, including the NULL ones.
 table["login_change_30d_pct"] = table["login_change_30d_pct"] * 100
 
 st.dataframe(
@@ -235,9 +244,15 @@ st.dataframe(
         "policy_value_gbp": st.column_config.NumberColumn(
             "Policy value", format="\u00a3%.0f"
         ),
+        "login_activity_status": st.column_config.TextColumn(
+            "Login status",
+            help="went_silent/no_activity_either_window = highest risk; "
+                 "new_or_reactivated/increased/flat = no login-risk points",
+        ),
         "login_change_30d_pct": st.column_config.NumberColumn(
             "Login change (30d)", format="%.0f%%",
-            help="-100% means no logins at all in the last 30 days versus the prior 30",
+            help="Blank means no prior-window activity to compare against — "
+                 "see Login status for what actually happened",
         ),
     },
 )
@@ -255,11 +270,14 @@ if client_options:
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Risk score", f"{row['risk_score']:.0f} / 100", row["risk_tier"])
-    c2.metric("Days to renewal", f"{row['days_to_renewal']:.0f}")
+    c2.metric("Days to renewal", f"{row['days_to_renewal']:.0f}", row["renewal_status"])
     c3.metric("Policy value", f"\u00a3{row['policy_value_gbp']:,.0f}")
 
+    login_pct = row["login_change_30d_pct"]
+    login_display = "N/A (no prior activity)" if pd.isna(login_pct) else f"{login_pct * 100:.0f}%"
+
     c4, c5, c6 = st.columns(3)
-    c4.metric("Login change (30d)", f"{row['login_change_30d_pct']*100:.0f}%")
+    c4.metric("Login change (30d)", login_display, row["login_activity_status"])
     c5.metric("Tickets (30d)", f"{row['tickets_last_30d']:.0f}")
     c6.metric("Unresolved tickets (30d)", f"{row['unresolved_last_30d']:.0f}")
 else:
@@ -268,5 +286,6 @@ else:
 st.caption(
     "Risk score is a transparent weighted rule (declining logins, ticket "
     "volume, unresolved tickets, renewal proximity) — not a trained model. "
-    "That's a deliberate starting point for interpretability."
+    "See the README for full limitations, including why market data isn't "
+    "part of the score."
 )

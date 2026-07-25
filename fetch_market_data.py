@@ -48,9 +48,15 @@ def fetch_market_data(tickers=BANK_TICKERS, period=PERIOD, interval=INTERVAL) ->
 
         all_rows.append(data)
 
+    if not all_rows:
+        raise RuntimeError(
+            "No market data was retrieved for any ticker. Check your internet "
+            "connection and that the ticker symbols are still valid."
+        )
+
     combined = pd.concat(all_rows, ignore_index=True)
 
-    # Normalise column names for Snowflake (upper/lower case can bite you later)
+    # Normalise column names for BigQuery (upper/lower case can bite you later)
     combined = combined.rename(columns={
         "Date": "trade_date",
         "Open": "open",

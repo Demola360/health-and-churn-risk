@@ -3,3 +3,4 @@ clients_risk_segment_ANSWER_KEY.csv
 .env
 secrets.toml
 __pycache__/
+*.json

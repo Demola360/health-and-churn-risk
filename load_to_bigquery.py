@@ -25,6 +25,7 @@ you come back to it after a long gap.
 import os
 import pandas as pd
 from google.cloud import bigquery
+from google.api_core.exceptions import NotFound
 
 REQUIRED_ENV_VARS = ["GCP_PROJECT_ID", "BQ_DATASET"]
 
@@ -47,10 +48,13 @@ def get_client() -> bigquery.Client:
 
 
 def ensure_dataset(client: bigquery.Client, dataset_id: str):
+    # Only treat "dataset doesn't exist" as create-it-then. Any other error
+    # (auth failure, permission denied, network issue) should surface as
+    # itself rather than being silently reinterpreted as a missing dataset.
     full_id = f"{client.project}.{dataset_id}"
     try:
         client.get_dataset(full_id)
-    except Exception:
+    except NotFound:
         print(f"Dataset {full_id} not found, creating it...")
         dataset = bigquery.Dataset(full_id)
         dataset.location = "US"
