@@ -15,9 +15,11 @@ Requires the same environment variables and auth as load_to_bigquery.py:
 """
 
 import os
+import json
 import pandas as pd
 import streamlit as st
 from google.cloud import bigquery
+from google.oauth2 import service_account
 
 st.set_page_config(
     page_title="Client Health & Churn Risk Dashboard",
@@ -25,8 +27,8 @@ st.set_page_config(
     layout="wide",
 )
 
-PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "health-and-churn-risk")
-DATASET = os.environ.get("BQ_DATASET", "client_retention")
+PROJECT_ID = os.environ.get("GCP_PROJECT_ID") or st.secrets.get("GCP_PROJECT_ID", "health-and-churn-risk")
+DATASET = os.environ.get("BQ_DATASET") or st.secrets.get("BQ_DATASET", "client_retention")
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +36,15 @@ DATASET = os.environ.get("BQ_DATASET", "client_retention")
 # ---------------------------------------------------------------------------
 @st.cache_resource
 def get_client() -> bigquery.Client:
+    # On Streamlit Community Cloud there's no local gcloud login, so a
+    # service account key stored in st.secrets is used instead. Locally,
+    # neither secret is set, so this falls back to your `gcloud auth
+    # application-default login` credentials exactly as before.
+    if "gcp_service_account" in st.secrets:
+        credentials = service_account.Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"])
+        )
+        return bigquery.Client(project=PROJECT_ID, credentials=credentials)
     return bigquery.Client(project=PROJECT_ID)
 
 
