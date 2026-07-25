@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Client Health & Churn Risk Dashboard
 
 Portfolio project simulating a predictive client retention engine for a
@@ -79,3 +80,6 @@ after a long break.
 | `generate_client_data.py` | Generates simulated client/login/ticket data |
 | `load_to_bigquery.py` | Loads all CSVs into BigQuery tables |
 | `requirements.txt` | Python dependencies |
+=======
+# health-and-churn-risk
+>>>>>>> 9a5036109dc9062581b07cd9dd49c062534d57cd
