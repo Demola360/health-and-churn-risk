@@ -221,9 +221,9 @@ sort_by = st.selectbox(
 ascending = st.checkbox("Ascending", value=False)
 
 display_cols = [
-    "client_id", "risk_tier", "risk_score", "renewal_status", "days_to_renewal",
-    "tenure_months", "policy_value_gbp", "login_activity_status", "login_change_30d_pct",
-    "tickets_last_30d", "unresolved_last_30d",
+    "client_id", "risk_tier", "risk_score", "recommended_action", "renewal_status",
+    "days_to_renewal", "tenure_months", "policy_value_gbp", "login_activity_status",
+    "login_change_30d_pct", "tickets_last_30d", "unresolved_last_30d",
 ]
 table = filtered[display_cols].sort_values(sort_by, ascending=ascending).copy()
 
@@ -241,6 +241,11 @@ st.dataframe(
         "risk_score": st.column_config.ProgressColumn(
             "Risk score", min_value=0, max_value=100, format="%.0f"
         ),
+        "recommended_action": st.column_config.TextColumn(
+            "Recommended action",
+            help="Derived from risk tier + renewal urgency — see the README for the full rule set",
+            width="medium",
+        ),
         "policy_value_gbp": st.column_config.NumberColumn(
             "Policy value", format="\u00a3%.0f"
         ),
@@ -257,6 +262,19 @@ st.dataframe(
     },
 )
 
+action_list = filtered.loc[
+    filtered["risk_tier"].isin(["High", "Medium"]),
+    ["client_id", "risk_tier", "recommended_action", "renewal_status",
+     "days_to_renewal", "policy_value_gbp"],
+].sort_values("risk_tier")
+
+st.download_button(
+    "Download action list (High + Medium risk clients)",
+    data=action_list.to_csv(index=False),
+    file_name="retention_action_list.csv",
+    mime="text/csv",
+)
+
 st.divider()
 
 # ---------------------------------------------------------------------------
@@ -267,6 +285,8 @@ client_options = filtered["client_id"].tolist()
 if client_options:
     selected_client = st.selectbox("Client ID", options=client_options)
     row = filtered[filtered["client_id"] == selected_client].iloc[0]
+
+    st.info(f"**Recommended action:** {row['recommended_action']}")
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Risk score", f"{row['risk_score']:.0f} / 100", row["risk_tier"])
@@ -280,6 +300,18 @@ if client_options:
     c4.metric("Login change (30d)", login_display, row["login_activity_status"])
     c5.metric("Tickets (30d)", f"{row['tickets_last_30d']:.0f}")
     c6.metric("Unresolved tickets (30d)", f"{row['unresolved_last_30d']:.0f}")
+
+    st.markdown("**Why this score — exact point breakdown:**")
+    driver_df = pd.DataFrame({
+        "Signal": ["Login decline", "Ticket volume/unresolved", "Renewal proximity"],
+        "Points": [
+            row["login_risk_points"],
+            row["ticket_risk_points"],
+            row["renewal_risk_points"],
+        ],
+        "Max possible": [40, 45, 15],
+    })
+    st.dataframe(driver_df, use_container_width=True, hide_index=True)
 else:
     st.info("No clients match the current filters.")
 

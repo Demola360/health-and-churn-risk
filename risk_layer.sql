@@ -22,6 +22,12 @@
 -- Compares login count in the last 7 days vs the 7 days before that
 -- (and same for 30-day windows). A shrinking count = declining engagement,
 -- one of the clearest early churn signals.
+--
+-- IMPORTANT: percentage change alone is ambiguous when either window has
+-- zero logins (0 -> 5 looks identical to "no data" using SAFE_DIVIDE alone,
+-- and 5 -> 0 vs 0 -> 0 both stringify as -100%/NULL if not handled
+-- explicitly). login_activity_status disambiguates these cases so scoring
+-- and display can't disagree with each other.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW client_retention.login_trend AS
 WITH logins AS (
@@ -48,9 +54,18 @@ SELECT
   logins_prior_7d,
   logins_last_30d,
   logins_prior_30d,
-  -- % change; NULL-safe against divide-by-zero for clients with no prior activity
+  -- Left as a genuine NULL (not a sentinel) when prior activity is zero —
+  -- a percentage change from zero is mathematically undefined, not -100%.
   SAFE_DIVIDE(logins_last_7d - logins_prior_7d, NULLIF(logins_prior_7d, 0)) AS login_change_7d_pct,
-  SAFE_DIVIDE(logins_last_30d - logins_prior_30d, NULLIF(logins_prior_30d, 0)) AS login_change_30d_pct
+  SAFE_DIVIDE(logins_last_30d - logins_prior_30d, NULLIF(logins_prior_30d, 0)) AS login_change_30d_pct,
+  CASE
+    WHEN logins_last_30d = 0 AND logins_prior_30d = 0 THEN 'no_activity_either_window'
+    WHEN logins_prior_30d = 0 AND logins_last_30d > 0 THEN 'new_or_reactivated'
+    WHEN logins_last_30d = 0 AND logins_prior_30d > 0 THEN 'went_silent'
+    WHEN logins_last_30d < logins_prior_30d THEN 'declined'
+    WHEN logins_last_30d > logins_prior_30d THEN 'increased'
+    ELSE 'flat'
+  END AS login_activity_status
 FROM login_counts;
 
 
@@ -115,38 +130,64 @@ WHERE DATE(TIMESTAMP(trade_date)) >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY);
 -- a risk tier. Weights are a starting point, not tuned — deliberately
 -- simple and explainable rather than a black-box model, so it's easy to
 -- walk through in an interview. Refine weights once you can compare scores
--- against the known risk_segment answer key.
+-- against the known risk_segment answer key (see the sanity-check query at
+-- the bottom of this file — note that comparison only checks whether this
+-- rule-based score can rediscover patterns that were deliberately built
+-- into the synthetic data; it is NOT a substitute for validating against
+-- real churn outcomes).
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE VIEW client_retention.client_risk_scores AS
+WITH scored AS (
+  SELECT
+    r.client_id,
+    r.tenure_months,
+    r.policy_value_gbp,
+    r.days_to_renewal,
+    CASE
+      WHEN r.days_to_renewal < 0 THEN 'Lapsed'
+      WHEN r.days_to_renewal <= 30 THEN 'Renewal due soon'
+      ELSE 'Upcoming'
+    END AS renewal_status,
+    -- Genuine NULL when there's no prior-window activity to compare against —
+    -- displayed as-is rather than forced into a misleading -100%.
+    l.login_change_30d_pct,
+    COALESCE(l.login_activity_status, 'no_login_records_at_all') AS login_activity_status,
+    COALESCE(t.tickets_last_30d, 0) AS tickets_last_30d,
+    COALESCE(t.unresolved_last_30d, 0) AS unresolved_last_30d,
+
+    -- Each component exposed individually (not just summed) so the
+    -- dashboard can say exactly which signal drove a client's score,
+    -- instead of guessing from the raw inputs after the fact.
+    (CASE
+       WHEN l.client_id IS NULL THEN 40
+       WHEN l.login_activity_status IN ('went_silent', 'no_activity_either_window') THEN 40
+       WHEN l.login_activity_status = 'declined'
+         THEN 40 * LEAST(1, GREATEST(0, -1 * l.login_change_30d_pct))
+       ELSE 0
+     END) AS login_risk_points,
+
+    -- Ticket volume + unresolved combined into one "ticket-related" bucket
+    -- (max 45) so the driver breakdown stays a clean 3-way split against
+    -- login (max 40) and renewal (max 15).
+    (30 * LEAST(1, COALESCE(t.tickets_last_30d, 0) / 6.0))
+      + (15 * LEAST(1, COALESCE(t.unresolved_last_30d, 0) / 3.0)) AS ticket_risk_points,
+
+    (15 * LEAST(1, GREATEST(0, (60 - r.days_to_renewal) / 60.0))) AS renewal_risk_points
+
+  FROM client_retention.renewal_window r
+  LEFT JOIN client_retention.login_trend l USING (client_id)
+  LEFT JOIN client_retention.ticket_trend t USING (client_id)
+)
 SELECT
-  r.client_id,
-  r.tenure_months,
-  r.policy_value_gbp,
-  r.days_to_renewal,
-  COALESCE(l.login_change_30d_pct, -1) AS login_change_30d_pct,
-  COALESCE(t.tickets_last_30d, 0) AS tickets_last_30d,
-  COALESCE(t.unresolved_last_30d, 0) AS unresolved_last_30d,
-
-  -- Risk score: 0-100, higher = higher churn risk.
-  -- Each component is clamped so no single factor can push the score out
-  -- of range on its own.
-  LEAST(100, GREATEST(0,
-    -- Declining logins: up to 40 points if logins dropped 100%+
-    (40 * LEAST(1, GREATEST(0, -1 * COALESCE(l.login_change_30d_pct, 0))))
-    -- Ticket volume: up to 30 points, capped at 6+ tickets in 30 days
-    + (30 * LEAST(1, COALESCE(t.tickets_last_30d, 0) / 6.0))
-    -- Unresolved tickets: up to 15 points, capped at 3+
-    + (15 * LEAST(1, COALESCE(t.unresolved_last_30d, 0) / 3.0))
-    -- Renewal proximity: up to 15 points as renewal approaches within 60 days
-    + (15 * LEAST(1, GREATEST(0, (60 - r.days_to_renewal) / 60.0)))
-  )) AS risk_score
-
-FROM client_retention.renewal_window r
-LEFT JOIN client_retention.login_trend l USING (client_id)
-LEFT JOIN client_retention.ticket_trend t USING (client_id);
+  *,
+  LEAST(100, GREATEST(0, login_risk_points + ticket_risk_points + renewal_risk_points)) AS risk_score
+FROM scored;
 
 
--- Add the risk tier as a final pass (kept separate for readability)
+-- Add the risk tier and a recommended action as a final pass (kept
+-- separate for readability). The action logic is intentionally simple —
+-- tier + renewal urgency only — matching the transparency of the scoring
+-- rules themselves rather than adding hidden complexity at the last step.
 CREATE OR REPLACE VIEW client_retention.client_risk_final AS
 SELECT
   *,
@@ -154,7 +195,20 @@ SELECT
     WHEN risk_score >= 65 THEN 'High'
     WHEN risk_score >= 35 THEN 'Medium'
     ELSE 'Low'
-  END AS risk_tier
+  END AS risk_tier,
+  CASE
+    WHEN risk_score >= 65 AND renewal_status = 'Lapsed'
+      THEN 'Recovery call — policy already lapsed, contact immediately'
+    WHEN risk_score >= 65 AND renewal_status = 'Renewal due soon'
+      THEN 'Priority retention outreach before renewal date'
+    WHEN risk_score >= 65
+      THEN 'Proactive check-in — high risk, renewal not yet imminent'
+    WHEN risk_score >= 35 AND renewal_status IN ('Lapsed', 'Renewal due soon')
+      THEN 'Soft touchpoint ahead of renewal decision'
+    WHEN risk_score >= 35
+      THEN 'Monitor — flag if score rises further'
+    ELSE 'No action needed'
+  END AS recommended_action
 FROM client_retention.client_risk_scores;
 
 
@@ -165,8 +219,12 @@ FROM client_retention.client_risk_scores;
 -- SELECT risk_tier, COUNT(*) AS n_clients, ROUND(AVG(risk_score),1) AS avg_score
 -- FROM client_retention.client_risk_final GROUP BY risk_tier ORDER BY avg_score DESC;
 
--- Cross-check against the simulated answer key (never expose this in the
--- dashboard — it exists only to validate the scoring logic works)
+-- Cross-check against the simulated answer key. IMPORTANT: this only tests
+-- whether the rule-based score can rediscover patterns that were
+-- deliberately built into the synthetic data generator — it is a pipeline
+-- sanity check, not model validation against real churn outcomes. Requires
+-- running load_answer_key.py first, which loads this table separately from
+-- the four tables used everywhere else (never joined into client_risk_final).
 -- SELECT f.risk_tier, k.risk_segment, COUNT(*) AS n
 -- FROM client_retention.client_risk_final f
 -- JOIN client_retention.clients_risk_segment_answer_key k USING (client_id)

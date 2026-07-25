@@ -133,8 +133,15 @@ what it would take to justify including it properly.
   current risk score, tier, and renewal status (Upcoming / Renewal due
   soon / Lapsed)
 - **Per-client drill-down** — the individual signals behind any one
-  client's score, so a relationship manager can see *why* a client is
-  flagged, not just that they are
+  client's score, plus an exact points breakdown (login/ticket/renewal) so
+  a relationship manager can see *why* a client is flagged, not just that
+  they are
+- **Recommended action per client** — derived from risk tier + renewal
+  urgency (e.g. "Recovery call — policy already lapsed" vs. "Monitor —
+  flag if score rises further"), so the score translates into a concrete
+  next step
+- **Downloadable action list** — a CSV of every High and Medium risk
+  client with their recommended action, ready to hand to a retention team
 
 In a test run against the current synthetic dataset, the dashboard
 surfaced 24 of 500 clients (4.8%) in the High risk tier, representing
