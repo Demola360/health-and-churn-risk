@@ -17,6 +17,7 @@ Requires the same environment variables and auth as load_to_bigquery.py:
 import os
 import json
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
@@ -145,20 +146,59 @@ left, right = st.columns([1, 2])
 
 with left:
     st.subheader("Risk tier distribution")
+    st.caption("How many clients fall into each risk category, right now.")
+
     tier_counts = (
         filtered["risk_tier"].value_counts().reindex(TIER_ORDER).fillna(0).astype(int)
     )
-    st.bar_chart(tier_counts, color="#1f77b4")
+    tier_df = pd.DataFrame({"risk_tier": tier_counts.index, "n_clients": tier_counts.values})
+
+    fig_bar = px.bar(
+        tier_df,
+        x="risk_tier",
+        y="n_clients",
+        color="risk_tier",
+        color_discrete_map=TIER_COLOR,
+        category_orders={"risk_tier": TIER_ORDER},
+        text="n_clients",
+        labels={"risk_tier": "Risk tier", "n_clients": "Number of clients"},
+    )
+    fig_bar.update_traces(textposition="outside")
+    fig_bar.update_layout(showlegend=False, yaxis_title="Clients", xaxis_title=None)
+    st.plotly_chart(fig_bar, use_container_width=True)
 
 with right:
     st.subheader("Risk score vs. days to renewal")
-    st.scatter_chart(
+    st.caption(
+        "Each dot is a client. Further left = renewal is closer. Higher up = "
+        "riskier. Bigger dot = higher policy value. The clients worth acting "
+        "on first sit in the top-left with a large bubble."
+    )
+
+    fig_scatter = px.scatter(
         filtered,
         x="days_to_renewal",
         y="risk_score",
         color="risk_tier",
         size="policy_value_gbp",
+        color_discrete_map=TIER_COLOR,
+        category_orders={"risk_tier": TIER_ORDER},
+        hover_name="client_id",
+        hover_data={
+            "risk_tier": True,
+            "policy_value_gbp": ":.0f",
+            "days_to_renewal": True,
+            "risk_score": True,
+        },
+        labels={
+            "days_to_renewal": "Days to renewal (negative = already passed)",
+            "risk_score": "Risk score",
+            "risk_tier": "Risk tier",
+        },
     )
+    fig_scatter.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+    fig_scatter.update_layout(legend_title_text="Risk tier")
+    st.plotly_chart(fig_scatter, use_container_width=True)
 
 st.divider()
 
