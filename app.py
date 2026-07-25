@@ -11,8 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 st.set_page_config(
-    page_title="Client Retention Risk",
-    page_icon="\U0001F4CA",
+    page_title="Client Retention Risk Prioritisation",
     layout="wide",
 )
 
@@ -79,7 +78,7 @@ TIER_COLOR = {"High": "#d62728", "Medium": "#ff7f0e", "Low": "#2ca02c"}
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.title("Client Retention Risk Prioritisation Dashboard")
+st.title("Client Retention Risk Prioritisation")
 st.caption(
     "Client behavioural data (logins, support tickets, renewal dates) is "
     "**simulated** with deliberately realistic risk patterns. Banking-sector "
