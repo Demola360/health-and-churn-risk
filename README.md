@@ -1,7 +1,10 @@
-# Client Health & Retention Risk Prioritisation Dashboard
+# Client Retention Risk Prioritisation Dashboard
 
-*(previously named "Client Health & Churn Risk Dashboard" — renamed to
-avoid implying a trained predictive model; see Limitations below)*
+*(previously "Client Health & Churn Risk Dashboard", then "Client Health
+& Retention Risk Prioritisation Dashboard" — "Health" dropped from the
+title because every signal in the score is a risk indicator, not a
+holistic health measure, and "predictive"/"churn" were dropped earlier
+to avoid implying a trained model; see Limitations below)*
 
 **A portfolio project that scores 500 simulated financial-services clients
 for retention risk, combining real live banking-sector market data with
