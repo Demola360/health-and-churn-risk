@@ -160,6 +160,45 @@ if not market.empty:
 st.divider()
 
 # ---------------------------------------------------------------------------
+# Segmentation: Risk x Value — tells the team where to spend budget
+# ---------------------------------------------------------------------------
+st.subheader("Segmentation: risk vs. value")
+st.caption(
+    "Clients split into four buckets by risk (High/Medium tier vs. Low) and "
+    "policy value (above vs. below the median of the current filtered set). "
+    "High Risk / High Value is where retention budget matters most."
+)
+
+if total_clients:
+    value_median = filtered["policy_value_gbp"].median()
+    seg = filtered.copy()
+    seg["value_bucket"] = seg["policy_value_gbp"].apply(
+        lambda v: "High Value" if v >= value_median else "Low Value"
+    )
+    seg["risk_bucket"] = seg["risk_tier"].apply(
+        lambda t: "High Risk" if t in ("High", "Medium") else "Low Risk"
+    )
+    seg_summary = (
+        seg.groupby(["risk_bucket", "value_bucket"])
+        .agg(clients=("client_id", "count"), total_policy_value=("policy_value_gbp", "sum"))
+        .reset_index()
+    )
+    seg_summary["segment"] = seg_summary["risk_bucket"] + " / " + seg_summary["value_bucket"]
+
+    seg_cols = st.columns(4)
+    segment_order = [
+        "High Risk / High Value", "High Risk / Low Value",
+        "Low Risk / High Value", "Low Risk / Low Value",
+    ]
+    for col, segment_name in zip(seg_cols, segment_order):
+        match = seg_summary[seg_summary["segment"] == segment_name]
+        n = int(match["clients"].iloc[0]) if not match.empty else 0
+        value = float(match["total_policy_value"].iloc[0]) if not match.empty else 0.0
+        col.metric(segment_name, f"{n} clients", f"\u00a3{value:,.0f}")
+
+st.divider()
+
+# ---------------------------------------------------------------------------
 # Risk tier distribution + scatter
 # ---------------------------------------------------------------------------
 left, right = st.columns([1, 2])
@@ -184,7 +223,14 @@ with left:
         labels={"risk_tier": "Risk tier", "n_clients": "Number of clients"},
     )
     fig_bar.update_traces(textposition="outside")
-    fig_bar.update_layout(showlegend=False, yaxis_title="Clients", xaxis_title=None)
+    fig_bar.update_layout(
+        showlegend=False,
+        xaxis_title=None,
+        yaxis_visible=False,
+        yaxis_showticklabels=False,
+        yaxis_showgrid=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
     st.plotly_chart(fig_bar, use_container_width=True)
 
 with right:
