@@ -1,17 +1,5 @@
 """
-Day 5: Streamlit dashboard
-Client Health & Churn Risk Dashboard
-
-Reads directly from the client_retention.client_risk_final view in BigQuery
-(built in risk_layer.sql) and presents portfolio-level risk metrics plus
-client-level drill-down.
-
-Run with:
-    streamlit run app.py
-
-Requires the same environment variables and auth as load_to_bigquery.py:
-    set GCP_PROJECT_ID=health-and-churn-risk
-    set BQ_DATASET=client_retention
+Client Retention Risk Prioritisation
 """
 
 import os
@@ -23,8 +11,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 
 st.set_page_config(
-    page_title="Client Retention Risk Dashboard",
-    page_icon="\U0001F4CA",
+    page_title="Client Retention Risk Prioritisation",
     layout="wide",
 )
 
@@ -91,7 +78,7 @@ TIER_COLOR = {"High": "#d62728", "Medium": "#ff7f0e", "Low": "#2ca02c"}
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.title("Client Retention Risk Prioritisation Dashboard")
+st.title("Client Retention Risk Prioritisation")
 st.caption(
     "Client behavioural data (logins, support tickets, renewal dates) is "
     "**simulated** with deliberately realistic risk patterns. Banking-sector "
